@@ -1,0 +1,83 @@
+import streamlit as st
+import pandas as pd
+from io import BytesIO
+
+st.set_page_config(page_title="Fusion de fichiers Excel", layout="wide")
+
+st.title("🔗 Application de fusion de fichiers Excel")
+
+# Étape 1 : Upload des fichiers
+st.header("1️⃣ Upload des fichiers Excel")
+file1 = st.file_uploader("Choisir le premier fichier Excel", type=["xlsx", "xls"], key="file1")
+file2 = st.file_uploader("Choisir le deuxième fichier Excel", type=["xlsx", "xls"], key="file2")
+
+if file1 and file2:
+    # Lecture des fichiers
+    try:
+        df1 = pd.read_excel(file1)
+        df2 = pd.read_excel(file2)
+    except Exception as e:
+        st.error(f"Erreur de lecture des fichiers : {e}")
+        st.stop()
+
+    st.success("✅ Fichiers chargés avec succès !")
+
+    # Affichage des premières lignes
+    with st.expander("📄 Aperçu du premier fichier"):
+        st.dataframe(df1.head())
+    with st.expander("📄 Aperçu du deuxième fichier"):
+        st.dataframe(df2.head())
+
+    # Étape 2 : Filtrage par date
+    st.header("2️⃣ Filtrage par colonne de date")
+
+    date_col1 = st.selectbox("Choisir la colonne de date du premier fichier :", df1.columns)
+    date_col2 = st.selectbox("Choisir la colonne de date du deuxième fichier :", df2.columns)
+
+    start_date = st.date_input("Date de début")
+    end_date = st.date_input("Date de fin")
+
+    try:
+        df1[date_col1] = pd.to_datetime(df1[date_col1], errors='coerce')
+        df2[date_col2] = pd.to_datetime(df2[date_col2], errors='coerce')
+
+        df1_filtered = df1[(df1[date_col1] >= pd.Timestamp(start_date)) & (df1[date_col1] <= pd.Timestamp(end_date))]
+        df2_filtered = df2[(df2[date_col2] >= pd.Timestamp(start_date)) & (df2[date_col2] <= pd.Timestamp(end_date))]
+    except Exception as e:
+        st.error(f"Erreur lors du filtrage par date : {e}")
+        st.stop()
+
+    st.write(f"✅ Fichier 1 filtré : {df1_filtered.shape[0]} lignes")
+    st.write(f"✅ Fichier 2 filtré : {df2_filtered.shape[0]} lignes")
+
+    # Étape 3 : Choix des colonnes de jointure
+    st.header("3️⃣ Choix des colonnes de jointure")
+    join_col1 = st.selectbox("Colonne de jointure dans le premier fichier :", df1_filtered.columns)
+    join_col2 = st.selectbox("Colonne de jointure dans le deuxième fichier :", df2_filtered.columns)
+    join_type = st.selectbox("Type de jointure :", ["inner", "left", "right", "outer"])
+
+    # Étape 4 : Fusion
+    if st.button("🔄 Fusionner les fichiers"):
+        try:
+            merged_df = pd.merge(df1_filtered, df2_filtered, how=join_type,
+                                 left_on=join_col1, right_on=join_col2)
+            st.success(f"✅ Fusion réussie ! {merged_df.shape[0]} lignes obtenues.")
+            st.dataframe(merged_df)
+
+            # Étape 5 : Téléchargement
+            output = BytesIO()
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                merged_df.to_excel(writer, index=False, sheet_name='Fusion')
+            excel_data = output.getvalue()
+
+            st.download_button(
+                label="📥 Télécharger le fichier fusionné (Excel)",
+                data=excel_data,
+                file_name="fusion_resultat.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+        except Exception as e:
+            st.error(f"Erreur lors de la fusion : {e}")
+else:
+    st.info("⬆️ Veuillez uploader deux fichiers Excel pour commencer.")
