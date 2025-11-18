@@ -1,3 +1,41 @@
+✔ Isolation Forest → anomalies globales
+✔ Local Outlier Factor → anomalies locales
+✔ One-Class SVM → comportement normal vs anormal
+✔ Clustering → comportement atypique par rapport à un cluster
+✔ Score global AML → décision agrégée
+
+🚨 1. Méthodes d’anomalie non supervisées
+
+Utile quand tu n’as pas de labels « fraude » ou « suspicion ».
+
+🔹 Isolation Forest
+	•	Très couramment utilisé en AML.
+	•	Isole les points atypiques dans l’espace des variables.
+Détecte par exemple :
+	•	Transactions avec quantité/prix déviants par rapport au marché.
+	•	Combinaisons atypiques (ex : faible FCCR mais gros volumes).
+
+🔹 Local Outlier Factor (LOF)
+	•	Compare la densité locale d’un point à celle de ses voisins.
+Détecte :
+	•	Clients/suppliers qui se comportent très différemment de ceux de leur secteur/pays.
+	•	Structures commerciales anormales dans une chaîne supply.
+
+🔹 One-Class SVM
+	•	Modélise la frontière du comportement « normal ».
+Détecte :
+	•	Patterns rares dans l’ensemble des traits de la transaction.
+
+⸻
+
+🚨 2. Clustering (pour détecter des points “hors cluster”)
+
+Utile pour segmenter et trouver les transactions qui n’appartiennent à aucun groupe logique.
+
+🔹 K-Means clustering
+	•	Tu segmentes par type de commodities, pays, volumes, FCCR…
+	•	Les points très éloignés du centre d’un cluster → suspicion.
+
 # ============================================================
 # AML Anomaly Detection Pipeline – Trade Sustainable Commodities
 # ============================================================
