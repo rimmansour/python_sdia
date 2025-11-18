@@ -1,83 +1,161 @@
-import streamlit as st
+# ============================================================
+# AML Anomaly Detection Pipeline – Trade Sustainable Commodities
+# ============================================================
+
 import pandas as pd
-from io import BytesIO
+import numpy as np
 
-st.set_page_config(page_title="Fusion de fichiers Excel", layout="wide")
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.cluster import KMeans
+from sklearn.ensemble import IsolationForest
+from sklearn.neighbors import LocalOutlierFactor
+from sklearn.svm import OneClassSVM
 
-st.title("🔗 Application de fusion de fichiers Excel")
 
-# Étape 1 : Upload des fichiers
-st.header("1️⃣ Upload des fichiers Excel")
-file1 = st.file_uploader("Choisir le premier fichier Excel", type=["xlsx", "xls"], key="file1")
-file2 = st.file_uploader("Choisir le deuxième fichier Excel", type=["xlsx", "xls"], key="file2")
+# ============================================================
+# 1. Chargement du fichier
+# ============================================================
 
-if file1 and file2:
-    # Lecture des fichiers
-    try:
-        df1 = pd.read_excel(file1)
-        df2 = pd.read_excel(file2)
-    except Exception as e:
-        st.error(f"Erreur de lecture des fichiers : {e}")
-        st.stop()
+INPUT_FILE = "transactions_trade_finance.csv"
+OUTPUT_FILE = "aml_anomaly_output.csv"
 
-    st.success("✅ Fichiers chargés avec succès !")
+print("Chargement du fichier...")
+df = pd.read_csv(INPUT_FILE)
+print(f"{len(df)} lignes chargées.")
 
-    # Affichage des premières lignes
-    with st.expander("📄 Aperçu du premier fichier"):
-        st.dataframe(df1.head())
-    with st.expander("📄 Aperçu du deuxième fichier"):
-        st.dataframe(df2.head())
 
-    # Étape 2 : Filtrage par date
-    st.header("2️⃣ Filtrage par colonne de date")
+# ============================================================
+# 2. Sélection des variables
+# ============================================================
 
-    date_col1 = st.selectbox("Choisir la colonne de date du premier fichier :", df1.columns)
-    date_col2 = st.selectbox("Choisir la colonne de date du deuxième fichier :", df2.columns)
+numeric_features = [
+    "quantity",
+    "price",
+    "quality",
+    "client_fccr",
+    "supplier_fccr"
+]
 
-    start_date = st.date_input("Date de début")
-    end_date = st.date_input("Date de fin")
+categorical_features = [
+    "commodity",
+    "origin_country",
+    "client_country",
+    "supplier_country",
+    "client_sector",
+    "supplier_sector"
+]
 
-    try:
-        df1[date_col1] = pd.to_datetime(df1[date_col1], errors='coerce')
-        df2[date_col2] = pd.to_datetime(df2[date_col2], errors='coerce')
+print("Variables numériques :", numeric_features)
+print("Variables catégorielles :", categorical_features)
 
-        df1_filtered = df1[(df1[date_col1] >= pd.Timestamp(start_date)) & (df1[date_col1] <= pd.Timestamp(end_date))]
-        df2_filtered = df2[(df2[date_col2] >= pd.Timestamp(start_date)) & (df2[date_col2] <= pd.Timestamp(end_date))]
-    except Exception as e:
-        st.error(f"Erreur lors du filtrage par date : {e}")
-        st.stop()
 
-    st.write(f"✅ Fichier 1 filtré : {df1_filtered.shape[0]} lignes")
-    st.write(f"✅ Fichier 2 filtré : {df2_filtered.shape[0]} lignes")
+# ============================================================
+# 3. Préprocessing : normalisation + encodage OneHot
+# ============================================================
 
-    # Étape 3 : Choix des colonnes de jointure
-    st.header("3️⃣ Choix des colonnes de jointure")
-    join_col1 = st.selectbox("Colonne de jointure dans le premier fichier :", df1_filtered.columns)
-    join_col2 = st.selectbox("Colonne de jointure dans le deuxième fichier :", df2_filtered.columns)
-    join_type = st.selectbox("Type de jointure :", ["inner", "left", "right", "outer"])
+numeric_transformer = Pipeline(steps=[
+    ("scaler", StandardScaler())
+])
 
-    # Étape 4 : Fusion
-    if st.button("🔄 Fusionner les fichiers"):
-        try:
-            merged_df = pd.merge(df1_filtered, df2_filtered, how=join_type,
-                                 left_on=join_col1, right_on=join_col2)
-            st.success(f"✅ Fusion réussie ! {merged_df.shape[0]} lignes obtenues.")
-            st.dataframe(merged_df)
+categorical_transformer = Pipeline(steps=[
+    ("encoder", OneHotEncoder(handle_unknown="ignore"))
+])
 
-            # Étape 5 : Téléchargement
-            output = BytesIO()
-            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                merged_df.to_excel(writer, index=False, sheet_name='Fusion')
-            excel_data = output.getvalue()
+preprocessor = ColumnTransformer(
+    transformers=[
+        ("num", numeric_transformer, numeric_features),
+        ("cat", categorical_transformer, categorical_features),
+    ]
+)
 
-            st.download_button(
-                label="📥 Télécharger le fichier fusionné (Excel)",
-                data=excel_data,
-                file_name="fusion_resultat.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
 
-        except Exception as e:
-            st.error(f"Erreur lors de la fusion : {e}")
-else:
-    st.info("⬆️ Veuillez uploader deux fichiers Excel pour commencer.")
+# ============================================================
+# 4. Isolation Forest
+# ============================================================
+
+print("\nIsolation Forest...")
+isof_pipeline = Pipeline(steps=[
+    ("preprocess", preprocessor),
+    ("model", IsolationForest(contamination=0.03, random_state=42))
+])
+
+df["isof_anomaly"] = isof_pipeline.fit_predict(df)
+df["isof_anomaly"] = df["isof_anomaly"].map({1: 0, -1: 1})
+
+
+# ============================================================
+# 5. Local Outlier Factor (LOF)
+# ============================================================
+
+print("Local Outlier Factor...")
+lof_pipeline = Pipeline(steps=[
+    ("preprocess", preprocessor),
+    ("model", LocalOutlierFactor(n_neighbors=20, contamination=0.03))
+])
+
+df["lof_anomaly"] = lof_pipeline.fit_predict(df)
+df["lof_anomaly"] = df["lof_anomaly"].map({1: 0, -1: 1})
+
+
+# ============================================================
+# 6. One-Class SVM
+# ============================================================
+
+print("One-Class SVM...")
+ocsvm_pipeline = Pipeline(steps=[
+    ("preprocess", preprocessor),
+    ("model", OneClassSVM(kernel="rbf", gamma="scale", nu=0.05))
+])
+
+df["ocsvm_anomaly"] = ocsvm_pipeline.fit_predict(df)
+df["ocsvm_anomaly"] = df["ocsvm_anomaly"].map({1: 0, -1: 1})
+
+
+# ============================================================
+# 7. Clustering KMeans + distance au centroid
+# ============================================================
+
+print("KMeans Clustering...")
+kmeans_pipeline = Pipeline(steps=[
+    ("preprocess", preprocessor),
+    ("model", KMeans(n_clusters=6, random_state=42))
+])
+
+df["cluster"] = kmeans_pipeline.fit_predict(df)
+
+print("Calcul des distances aux centroides...")
+preprocessed = kmeans_pipeline.named_steps["preprocess"].transform(df)
+centroids = kmeans_pipeline.named_steps["model"].cluster_centers_
+
+dists = np.linalg.norm(preprocessed - centroids[df["cluster"]], axis=1)
+df["cluster_anomaly_score"] = dists
+
+threshold = df["cluster_anomaly_score"].quantile(0.95)
+df["cluster_anomaly"] = (df["cluster_anomaly_score"] > threshold).astype(int)
+
+
+# ============================================================
+# 8. Score global d’anomalie
+# ============================================================
+
+print("\nAgrégation des scores...")
+df["anomaly_score_total"] = (
+    df["isof_anomaly"] +
+    df["lof_anomaly"] +
+    df["ocsvm_anomaly"] +
+    df["cluster_anomaly"]
+)
+
+df["is_suspicious"] = (df["anomaly_score_total"] >= 2).astype(int)
+
+print("Nombre total d'observations suspectes :", df["is_suspicious"].sum())
+
+
+# ============================================================
+# 9. Export
+# ============================================================
+
+df.to_csv(OUTPUT_FILE, index=False)
+print("\nExport terminé :", OUTPUT_FILE)
