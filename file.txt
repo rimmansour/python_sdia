@@ -1,199 +1,185 @@
-✔ Isolation Forest → anomalies globales
-✔ Local Outlier Factor → anomalies locales
-✔ One-Class SVM → comportement normal vs anormal
-✔ Clustering → comportement atypique par rapport à un cluster
-✔ Score global AML → décision agrégée
-
-🚨 1. Méthodes d’anomalie non supervisées
-
-Utile quand tu n’as pas de labels « fraude » ou « suspicion ».
-
-🔹 Isolation Forest
-	•	Très couramment utilisé en AML.
-	•	Isole les points atypiques dans l’espace des variables.
-Détecte par exemple :
-	•	Transactions avec quantité/prix déviants par rapport au marché.
-	•	Combinaisons atypiques (ex : faible FCCR mais gros volumes).
-
-🔹 Local Outlier Factor (LOF)
-	•	Compare la densité locale d’un point à celle de ses voisins.
-Détecte :
-	•	Clients/suppliers qui se comportent très différemment de ceux de leur secteur/pays.
-	•	Structures commerciales anormales dans une chaîne supply.
-
-🔹 One-Class SVM
-	•	Modélise la frontière du comportement « normal ».
-Détecte :
-	•	Patterns rares dans l’ensemble des traits de la transaction.
-
-⸻
-
-🚨 2. Clustering (pour détecter des points “hors cluster”)
-
-Utile pour segmenter et trouver les transactions qui n’appartiennent à aucun groupe logique.
-
-🔹 K-Means clustering
-	•	Tu segmentes par type de commodities, pays, volumes, FCCR…
-	•	Les points très éloignés du centre d’un cluster → suspicion.
-
-# ============================================================
-# AML Anomaly Detection Pipeline – Trade Sustainable Commodities
-# ============================================================
-
+from pathlib import Path
+import fitz  # PyMuPDF
 import pandas as pd
-import numpy as np
 
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
-from sklearn.compose import ColumnTransformer
-from sklearn.pipeline import Pipeline
-from sklearn.cluster import KMeans
-from sklearn.ensemble import IsolationForest
-from sklearn.neighbors import LocalOutlierFactor
-from sklearn.svm import OneClassSVM
+#######################################################
+# 1. Détection PDF natif / scanné
+#######################################################
 
+def get_pdf_type(pdf_path, min_chars=100):
+    """
+    Retourne :
+        - pdf_natif
+        - pdf_scanné
+        - pdf_mixte
+        - pdf_vide
+    """
 
-# ============================================================
-# 1. Chargement du fichier
-# ============================================================
+    try:
+        doc = fitz.open(pdf_path)
 
-INPUT_FILE = "transactions_trade_finance.csv"
-OUTPUT_FILE = "aml_anomaly_output.csv"
+        total_text = 0
+        image_pages = 0
 
-print("Chargement du fichier...")
-df = pd.read_csv(INPUT_FILE)
-print(f"{len(df)} lignes chargées.")
+        for page in doc:
+            text = page.get_text().strip()
+            total_text += len(text)
 
+            images = page.get_images(full=True)
+            if len(images) > 0:
+                image_pages += 1
 
-# ============================================================
-# 2. Sélection des variables
-# ============================================================
+        nb_pages = len(doc)
 
-numeric_features = [
-    "quantity",
-    "price",
-    "quality",
-    "client_fccr",
-    "supplier_fccr"
-]
+        if total_text < min_chars:
+            if image_pages == nb_pages:
+                return "pdf_scanné"
+            return "pdf_vide"
 
-categorical_features = [
-    "commodity",
-    "origin_country",
-    "client_country",
-    "supplier_country",
-    "client_sector",
-    "supplier_sector"
-]
+        if image_pages > 0:
+            return "pdf_mixte"
 
-print("Variables numériques :", numeric_features)
-print("Variables catégorielles :", categorical_features)
+        return "pdf_natif"
+
+    except Exception:
+        return "erreur_pdf"
 
 
-# ============================================================
-# 3. Préprocessing : normalisation + encodage OneHot
-# ============================================================
+#######################################################
+# 2. Classification des PDF natifs
+#######################################################
 
-numeric_transformer = Pipeline(steps=[
-    ("scaler", StandardScaler())
-])
+def classify_native_pdf(pdf_path):
 
-categorical_transformer = Pipeline(steps=[
-    ("encoder", OneHotEncoder(handle_unknown="ignore"))
-])
+    try:
+        doc = fitz.open(pdf_path)
+        text = ""
 
-preprocessor = ColumnTransformer(
-    transformers=[
-        ("num", numeric_transformer, numeric_features),
-        ("cat", categorical_transformer, categorical_features),
-    ]
-)
+        # On lit seulement les 3 premières pages
+        for page in doc[:3]:
+            text += page.get_text()
 
+        text = text.lower()
 
-# ============================================================
-# 4. Isolation Forest
-# ============================================================
+        ###################################################
+        # Formulaire d'évaluation
+        ###################################################
 
-print("\nIsolation Forest...")
-isof_pipeline = Pipeline(steps=[
-    ("preprocess", preprocessor),
-    ("model", IsolationForest(contamination=0.03, random_state=42))
-])
+        score_eval = 0
 
-df["isof_anomaly"] = isof_pipeline.fit_predict(df)
-df["isof_anomaly"] = df["isof_anomaly"].map({1: 0, -1: 1})
+        eval_keywords = [
+            "formulaire d'évaluation",
+            "orientation résultats",
+            "orientation clients",
+            "communication",
+            "coopération",
+            "conduite du changement",
+            "points à développer",
+            "appréciations générales",
+            "notation",
+            "commentaires"
+        ]
 
+        for kw in eval_keywords:
+            if kw in text:
+                score_eval += 1
 
-# ============================================================
-# 5. Local Outlier Factor (LOF)
-# ============================================================
+        ###################################################
+        # Avenant contrat
+        ###################################################
 
-print("Local Outlier Factor...")
-lof_pipeline = Pipeline(steps=[
-    ("preprocess", preprocessor),
-    ("model", LocalOutlierFactor(n_neighbors=20, contamination=0.03))
-])
+        score_avenant = 0
 
-df["lof_anomaly"] = lof_pipeline.fit_predict(df)
-df["lof_anomaly"] = df["lof_anomaly"].map({1: 0, -1: 1})
+        avenant_keywords = [
+            "avenant de renouvellement de période d'essai",
+            "période d'essai",
+            "travail effectif",
+            "convention collective",
+            "responsable ressources humaines",
+            "nous renouvelons votre période d'essai",
+            "expression de nos salutations distinguées"
+        ]
 
+        for kw in avenant_keywords:
+            if kw in text:
+                score_avenant += 1
 
-# ============================================================
-# 6. One-Class SVM
-# ============================================================
+        ###################################################
 
-print("One-Class SVM...")
-ocsvm_pipeline = Pipeline(steps=[
-    ("preprocess", preprocessor),
-    ("model", OneClassSVM(kernel="rbf", gamma="scale", nu=0.05))
-])
+        if score_eval >= 3:
+            return "formulaire_evaluation"
 
-df["ocsvm_anomaly"] = ocsvm_pipeline.fit_predict(df)
-df["ocsvm_anomaly"] = df["ocsvm_anomaly"].map({1: 0, -1: 1})
+        if score_avenant >= 2:
+            return "avenant_contrat"
 
+        return "autre"
 
-# ============================================================
-# 7. Clustering KMeans + distance au centroid
-# ============================================================
-
-print("KMeans Clustering...")
-kmeans_pipeline = Pipeline(steps=[
-    ("preprocess", preprocessor),
-    ("model", KMeans(n_clusters=6, random_state=42))
-])
-
-df["cluster"] = kmeans_pipeline.fit_predict(df)
-
-print("Calcul des distances aux centroides...")
-preprocessed = kmeans_pipeline.named_steps["preprocess"].transform(df)
-centroids = kmeans_pipeline.named_steps["model"].cluster_centers_
-
-dists = np.linalg.norm(preprocessed - centroids[df["cluster"]], axis=1)
-df["cluster_anomaly_score"] = dists
-
-threshold = df["cluster_anomaly_score"].quantile(0.95)
-df["cluster_anomaly"] = (df["cluster_anomaly_score"] > threshold).astype(int)
+    except:
+        return "autre"
 
 
-# ============================================================
-# 8. Score global d’anomalie
-# ============================================================
+#######################################################
+# 3. Analyse des fichiers
+#######################################################
 
-print("\nAgrégation des scores...")
-df["anomaly_score_total"] = (
-    df["isof_anomaly"] +
-    df["lof_anomaly"] +
-    df["ocsvm_anomaly"] +
-    df["cluster_anomaly"]
-)
+def analyse_document(path):
 
-df["is_suspicious"] = (df["anomaly_score_total"] >= 2).astype(int)
+    ext = Path(path).suffix.lower().replace(".", "")
 
-print("Nombre total d'observations suspectes :", df["is_suspicious"].sum())
+    pdf_type = None
+    doc_type = None
+
+    if ext != "pdf":
+        return {
+            "extension": ext,
+            "pdf_type": pd.NA,
+            "type_document": pd.NA
+        }
+
+    pdf_type = get_pdf_type(path)
+
+    if pdf_type == "pdf_natif":
+        doc_type = classify_native_pdf(path)
+    else:
+        doc_type = pd.NA
+
+    return {
+        "extension": ext,
+        "pdf_type": pdf_type,
+        "type_document": doc_type
+    }
 
 
-# ============================================================
-# 9. Export
-# ============================================================
+#######################################################
+# 4. Parcours d'un dossier
+#######################################################
 
-df.to_csv(OUTPUT_FILE, index=False)
-print("\nExport terminé :", OUTPUT_FILE)
+def analyse_dossier(folder):
+
+    folder = Path(folder)
+
+    rows = []
+
+    for file in folder.rglob("*"):
+
+        if file.is_file():
+
+            info = analyse_document(file)
+
+            rows.append({
+                "fichier": str(file),
+                **info
+            })
+
+    return pd.DataFrame(rows)
+
+
+#######################################################
+# Exemple
+#######################################################
+
+df = analyse_dossier(r"C:\MesDocuments")
+
+print(df)
+
+df.to_excel("classification_documents.xlsx", index=False)
