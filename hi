@@ -5,3 +5,11 @@ model = SentenceTransformer(
 )
 
 model.save("./multilingual-e5-small-local")
+
+from huggingface_hub import snapshot_download
+
+snapshot_download(
+    repo_id="intfloat/multilingual-e5-small",
+    local_dir="./multilingual-e5-small-sharded",
+    max_shard_size="100MB"
+)
