@@ -4,4 +4,12 @@ model = SentenceTransformer(
     "intfloat/multilingual-e5-small"
 )
 
-model.save("./multilingual-e5-small-local")
+model.save_pretrained(
+
+    "./multilingual-e5-small-sharded",
+
+    safe_serialization=True,
+
+    max_shard_size="100MB"
+
+)
